@@ -1,14 +1,16 @@
 #include <iostream>
 #include <vector>
+#include <deque>
 #include <fstream>
 #include <cstdlib>
 #include <cstring>
 #include <algorithm>
 #include <cmath>
+#include <chrono>
 
 using namespace std;
 
-void LoadBuffer(ifstream &infile,vector<int> &buffer,int bufMax){
+void LoadBuffer(ifstream &infile,deque <int> &buffer,int bufMax){
     string s;
     while(getline(infile,s)){
         buffer.push_back(stoi(s));
@@ -19,7 +21,7 @@ void LoadBuffer(ifstream &infile,vector<int> &buffer,int bufMax){
     return;
 }
 
-void DumpBuffer(vector<int> &buffer,string outputFileName){
+void DumpBuffer(deque<int> &buffer,string outputFileName){
     ofstream outfile(outputFileName,ofstream::app);
     if(!outfile){
         cerr << "fail to open file:" << outputFileName <<endl;
@@ -27,7 +29,7 @@ void DumpBuffer(vector<int> &buffer,string outputFileName){
     }
 
     for(int i = 0 ;i < buffer.size();++i){
-        outfile << buffer.at(i) << endl;
+        outfile << buffer.at(i) << "\n";
     }
     buffer.clear();
     outfile.close();
@@ -36,15 +38,15 @@ void DumpBuffer(vector<int> &buffer,string outputFileName){
 void DumpBufferOverride(vector<int> &buffer,string outputFileName){
     ofstream outfile(outputFileName,ofstream::out);
     for(int i = 0 ;i < buffer.size();++i){
-        outfile << buffer.at(i) << endl;
+        outfile << buffer.at(i) << "\n";
     }
     buffer.clear();
     outfile.close();
 }
 
-void CopyRestFile(ifstream &infile, vector<int> &buffer, int bufMax,string outputFileName){
+void CopyRestFile(ifstream &infile, deque<int> &buffer, int bufMax,string outputFileName){
     while(1){
-        LoadBuffer(infile,buffer,bufMax);
+        LoadBuffer(infile,buffer,bufMax);//load to output buffer
         DumpBuffer(buffer,outputFileName);
         if(infile.eof()){
             return;
@@ -53,9 +55,9 @@ void CopyRestFile(ifstream &infile, vector<int> &buffer, int bufMax,string outpu
 }
 
 
-void MergeFile(string filename1, string filename2,int subtextNum,int round){
-    int inBufNum = 250;//250,000,000 * 4 byte = 1GB
-    int outBufNum = 500;//500,000,000 * 4byte = 2GB
+void MergeFile(string filename1, string filename2,int subtextNum,int round,int memSize){
+    size_t inBufNum = memSize *  (1000000000 / 16);//use quarter of memory and one int is 4 byte
+    size_t outBufNum = memSize * (1000000000 / 8 );//use half of memory and one int is 4 byte
     string subfileName = to_string(round) + "_" + to_string(subtextNum) +".txt";//filename
     ifstream infile1(filename1);
     if(!infile1){
@@ -70,14 +72,14 @@ void MergeFile(string filename1, string filename2,int subtextNum,int round){
     }
 
 
-    vector <int> inBuffer1,inBuffer2,outBuffer;
+    deque <int> inBuffer1,inBuffer2,outBuffer;
 
     while(1){//determind end of file with infinite loop with eof()
         //repeatly fill input buffer
-        if(inBuffer1.size() == 0){
+        if(inBuffer1.empty()){
             LoadBuffer(infile1,inBuffer1,inBufNum);
         }
-        if(inBuffer2.size() == 0){
+        if(inBuffer2.empty()){
             LoadBuffer(infile2,inBuffer2,inBufNum);
         }
        
@@ -95,15 +97,16 @@ void MergeFile(string filename1, string filename2,int subtextNum,int round){
             break;
         }
         //merge sort
-        if(inBuffer1.at(0) < inBuffer2.at(0)){ // if first element in buffer1 > buffer2
-            outBuffer.push_back(inBuffer1.at(0));
-            inBuffer1.erase(inBuffer1.begin());//pop first element in buffer1
+        if(inBuffer1.front() < inBuffer2.front()){ // if first element in buffer1 > buffer2
+            outBuffer.push_back(inBuffer1.front());
+            inBuffer1.pop_front();//pop first element in buffer1
         }
         else{
-            outBuffer.push_back(inBuffer2.at(0));
-            inBuffer2.erase(inBuffer2.begin());
+            outBuffer.push_back(inBuffer2.front());
+            inBuffer2.pop_front();
         }
-        if(outBuffer.size() == outBufNum){//output buffer full
+		
+        if(outBuffer.size() >= outBufNum){//output buffer full
             DumpBuffer(outBuffer,subfileName);
         }
     }
@@ -114,11 +117,16 @@ void MergeFile(string filename1, string filename2,int subtextNum,int round){
     return;
 }
 
-int main(){
-    //input file segmantation and sort
-    int bufNum = 500; //500,000,000 * 4byte = 2GB
+int main(int argc,char * argv[]){
+	chrono::steady_clock::time_point begin = std::chrono::steady_clock::now();//timer start    
+	//input file segmantation and sort
+	int memSize = atoi(argv[1]);
+	char*  inputFilePath = argv[2];
+    size_t bufNum = memSize *(1000000000 / 8);//use half of memory and one int is 4 byte
     vector<int> buffer;
-    ifstream infile("test.txt");
+	buffer.reserve(bufNum);
+
+    ifstream infile(inputFilePath);
     if(!infile){
         cerr << "fail to open file:test.txt"  <<endl;
         exit(1);
@@ -128,17 +136,21 @@ int main(){
     int round = 0;
     
     remove("output.txt");//remove previous result
-
+	
+	int i = 0;
     while (getline (infile, readtext)) {
         buffer.push_back(stoi(readtext));
-        if(buffer.size() == bufNum){//buffer full dump buffer
+		++i;
+
+        if(i == bufNum){//buffer full dump buffer
             sort(buffer.begin(),buffer.end()); //call lib function to sort buffer
             string subfileName = "0_" + to_string(subtextNum) +".txt";//filename
             DumpBufferOverride(buffer,subfileName);
+			i = 0;
             ++subtextNum;
         }
     }
-    if(buffer.size() > 0){//sort remainder
+    if(i > 0){//sort remainder
         sort(buffer.begin(),buffer.end()); //call lib function to sort buffer
         string subfileName = "0_" + to_string(subtextNum) +".txt";//filename
         DumpBufferOverride(buffer,subfileName);
@@ -158,7 +170,7 @@ int main(){
             for(int j = 0;j < roundTextNum;j = j + 2){
                 string inFileName1 =  to_string(i) + "_" + to_string(j) +".txt";
                 string inFileName2 =  to_string(i) + "_" + to_string(j + 1) +".txt";
-                MergeFile(inFileName1,inFileName2,subtextNum,i + 1);
+                MergeFile(inFileName1,inFileName2,subtextNum,i + 1,memSize);
                 ++subtextNum;
             }
         }
@@ -166,13 +178,13 @@ int main(){
             for(int j = 0;j < roundTextNum - 1; j = j +2){//sort the first even files first
                 string inFileName1 =  to_string(i) + "_" + to_string(j) +".txt";
                 string inFileName2 =  to_string(i) + "_" + to_string(j + 1) +".txt";
-                MergeFile(inFileName1,inFileName2,subtextNum,i + 1);
+                MergeFile(inFileName1,inFileName2,subtextNum,i + 1,memSize);
                 ++subtextNum;
             }
             //last file
             string inFileName1 =  to_string(i) + "_" + to_string(roundTextNum - 1) +".txt";// last file ex:0_4.txt
             string inFileName2 =  to_string(i + 1) + "_" + to_string(subtextNum - 1) +".txt";// last file in next round ex:1_1.txt
-            MergeFile(inFileName1,inFileName2,subtextNum,i + 1);
+            MergeFile(inFileName1,inFileName2,subtextNum,i + 1,memSize);
             string oldFileName =  to_string(i + 1) + "_" + to_string(subtextNum) +".txt";
             string newFileName =  to_string(i + 1) + "_" + to_string(subtextNum - 1) +".txt";
             rename(oldFileName.c_str(), newFileName.c_str());
@@ -181,5 +193,9 @@ int main(){
         roundTextNum = subtextNum; //loop boundary for each rounds
     }
     rename((to_string(maxRound) + "_0.txt").c_str(),"output.txt");//rename to match assignment requirement
-    return 0;
+	chrono::steady_clock::time_point end = std::chrono::steady_clock::now();
+
+
+    cout << "Elapsed time in milliseconds : "<< chrono::duration_cast<chrono::milliseconds>(end - begin).count()<< " ms" << endl;    
+	return 0;
 }
